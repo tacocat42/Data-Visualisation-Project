@@ -1,0 +1,283 @@
+---
+title: "project_greven"
+author: "Jean-Paul Greven"
+date: "1/9/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+# Importing data 
+df_killings <- readr::read_csv("PoliceKillingsUS.csv")
+df_income <- readr::read_csv("MedianHouseholdIncome2015.csv")
+df_race <- readr::read_csv("ShareRaceByCity.csv")
+df_education <- readr::read_csv("PercentOver25CompletedHighSchool.csv")
+```
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(cowplot)
+library(broom)
+```
+
+# Dataset presentation
+
+I will use the fatal police shootings in the US data. It comprises 5 datasets, of which 4 will be used during this project. The first section shall present those datasets, the second will be a first visualization of elements from the main dataset : "PoliceKillingsUS.csv". The second section will try to link the main dataset to the race share. Finally, the last section will link income and education to the police killings location.
+
+Since the authors for the main and side datasets are different, the main challenge of this project will consist in manipulating the data to allow a neat visualization between the main dataset and the three other ones. Thus a significant part of the code is Dplyr commands to then be able to use ggplot efficiently.
+
+Let's have a glance at the datasets:
+
+```{r}
+df_killings %>% str()
+df_income %>% str()
+df_race %>% str()
+df_education %>% str()
+
+```
+
+
+
+
+# Sign of mental illness during killings relation to sex and age
+
+First, I will navigate the main dataset and try to visualize links between the sign of mental illness, sex and age.
+
+```{r effort1}
+
+  p1 <- df_killings %>%
+  select(age,gender,signs_of_mental_illness) %>%
+  drop_na() %>%
+  filter(gender == "M") %>%
+  mutate_at("age", as.numeric)%>%
+  mutate(agegroup = case_when(age >= 60   ~ '60+',
+                              age >= 40  & age <= 59 ~ '40-59',
+                              age >= 20  & age <= 39 ~ '20-39',
+                              age >= 0  & age <= 19 ~ '0-19',))%>%
+  ggplot()+
+  geom_bar(aes(x=agegroup,fill=factor(signs_of_mental_illness)),position = position_dodge(preserve = 'single'))+
+  labs(y="Number of killings",x="Age", title = "Sign of mental illness before shooting among men")+
+  scale_fill_discrete(name = "Sign of mental illness", labels = c("No", "Yes"))+
+  theme_minimal()+
+  theme(plot.title = element_text(size=10))
+
+
+  p2 <- df_killings %>%
+  select(age,gender,signs_of_mental_illness) %>%
+  drop_na() %>%
+  filter(gender == "F") %>%
+  mutate_at("age", as.numeric)%>%
+  mutate(agegroup = case_when(age >= 60   ~ '60+',
+                              age >= 40  & age <= 59 ~ '40-59',
+                              age >= 20  & age <= 39 ~ '20-39',
+                              age >= 0  & age <= 19 ~ '0-19',))%>%
+  ggplot()+
+  geom_bar(aes(x=agegroup,fill=factor(signs_of_mental_illness)),position = position_dodge(preserve = 'single'))+
+  labs(y="",x="Age", title = "Sign of mental illness before shooting among women")+
+  scale_fill_discrete(name = "Sign of mental illness", labels = c("No", "Yes"))+
+  theme_minimal()+
+  theme(plot.title = element_text(size=10))
+  
+
+  ggarrange(p1, p2, common.legend = TRUE, legend="bottom")
+
+
+```
+
+Even if the number of fatal shootings involving women is smaller, we remark that the sign of mental illness is generally more present for them than men, for all age groups. We also remark that those signs are more present with age.
+
+
+# Killings and Race by state
+
+The first section aims to visualize the differences between the race shares by state and race shares in the fatal police shootings that occurred in those states. I shall first transform the city data to state data and plot it for each state. The second part will consist in extracting the relevant data from the police killings dataset, manipulate it in order to have a similar plot (it is not the same method since I have to extract shares from raw data). Finally, the goal of this section is to optimally combine those plots to visualize how race impacts fatal police shootings.To do so, I will compare the five states where most of the shootings happened.
+
+```{r 2.1 Race share by State}
+
+# Cleaning the dataset (removing missing values and setting the shares to numeric)
+
+share_races <- c("share_white", "share_black", "share_asian", "share_hispanic", "share_native_american")
+
+df_race_clean <- df_race %>% 
+  filter(share_white != "(X)") %>% # removing missing data
+  mutate(across(all_of(share_races), as.numeric)) # switching to numeric
+
+# Aggregating to obtain the share by state
+
+df_states_race <- df_race_clean %>%
+  group_by(`Geographic area`) %>%
+  summarise(across(share_races, mean))
+
+# plot
+
+df_states_race %>%
+  pivot_longer(!`Geographic area`, names_to = "race_share", values_to = "share") %>%
+  ggplot(aes(x=`Geographic area`,y=share,fill=race_share))+
+  geom_col(width = 0.6)+
+  coord_flip()+
+  labs(x="State",y="Share (%)", title = "Race share by State")+
+  scale_fill_discrete(name = "Race", labels = c("Asian", "Black", "Hispanic", "Native American", "White"))+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme_minimal()
+
+
+
+
+```
+```{r 2.2 Race Share in Fatal Police Shootings by State}
+
+
+# Extracting the race share from the data 
+
+df_killings %>%
+  filter(race != 'O') %>% # Dropping the "other" value for race
+  drop_na(race) %>%
+  select(race,state)%>%
+  group_by(race,state)%>%
+  tally() %>% # Manipulations to have "plotable" data
+  group_by(state)%>%
+  mutate(total = sum(n), share = 100*n/total) %>% # Transforming count to share
+  ggplot(aes(x=state,y=share,fill=race))+
+  geom_col(width = 0.6)+
+  coord_flip()+
+  labs(x="State",y="Share (%)", title = "Race Share in Fatal Police Shootings by State")+
+  scale_fill_discrete(name = "Race", labels = c("Asian", "Black", "Hispanic", "Native American", "White"))+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme_minimal()
+
+  
+```
+```{r 2.3 Top Five States}
+# Final plot 
+
+## Isolating the top 5 states in the killing dataset
+
+top5 <- df_killings %>%
+  drop_na(race) %>%
+  count(state)%>%
+  slice_max(n, n=5) %>%
+  pull(state)
+
+
+p2 <- df_killings %>%
+  filter(state %in% top5, race != 'O') %>% #Taking top 5, dropping the "other" value for race
+  drop_na(race) %>%
+  select(race,state)%>%
+  group_by(race,state)%>%
+  tally() %>% # Manipulation to have plotable data
+  group_by(state)%>%
+  mutate(total = sum(n), share = 100*n/total) %>% # Transforming count to share
+  ggplot(aes(x=state,y=share,fill=race))+
+  geom_col(width = 0.6)+
+  coord_flip()+
+  labs(x="",y="Share (%)", title = "Race share in fatal police shootings")+
+  scale_fill_discrete(name = "Race", labels = c("Asian", "Black", "Hispanic", "Native American", "White"))+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme(plot.title = element_text(size=10))+
+  theme_minimal()
+
+
+
+p1 <- df_states_race %>%
+  filter(`Geographic area` %in% top5)%>%
+  pivot_longer(!`Geographic area`, names_to = "race_share", values_to = "share") %>%
+  ggplot(aes(x=`Geographic area`,y=share,fill=race_share))+
+  geom_col(width = 0.6)+
+  coord_flip()+
+  labs(x="",y="Share (%)", title = "Race share by State")+
+  scale_fill_discrete(name = "Race", labels = c("Asian", "Black", "Hispanic", "Native American", "White"))+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  theme(plot.title = element_text(size=10))+
+  theme_minimal()
+  
+effort2 <- ggarrange(p1, p2, common.legend = TRUE, legend="bottom")
+annotate_figure(effort2, top = text_grob("Top Five States", 
+               color = "red", face = "bold", size = 13))
+```
+We can directly observe that Black people are a lot more likely to be victim of a police shooting in those five states. We also note that in Arizona and California, Hispanic people are also more likely to die in such circumstances. This however seems not to be true for the three other states. 
+
+
+# Education & Income trend by city of killing
+
+In this section I will try to visualize if income or education plays a role in the location of fatal shootings. First I will plot the city distribution by both income and education. Education is evaluated by the percentage of people over 25 that have a high school degree, while income will be assessed by the median annual household income of the city.
+
+```{r 3.1 shooting cities}
+
+df_temp1 <- rename(df_education, education = 3, city = 2, state = 1)%>%
+mutate(city = word(city , 1  , -2))
+df_temp2 <-  rename(df_income,income = 3, city = 2, state = 1)%>%
+mutate(city = word(city , 1  , -2))
+
+shooting_cities <- df_temp1 %>% 
+  inner_join(df_temp2, by = c("city","state")) %>%
+  inner_join(df_killings, by = c("city","state")) %>%
+  select(state,city,education,income)%>%
+  group_by(state,city) %>%
+  mutate(count = n()) %>%
+  unite("city",state:city, remove = TRUE)%>%
+  drop_na()%>%
+  filter(income != "(X)", education != "(X)",income != "-", education != "-")
+  
+  
+shooting_cities  %>%
+  mutate_at(c("education","income"),as.numeric)%>%
+  ggplot(aes(x=income,y=education))+
+  geom_jitter(aes(size = count), alpha = 0.3,color = "red") +
+  scale_size(range = c(0, 10))+
+  theme(axis.text.x=element_blank(),axis.text.y=element_blank())+
+  theme_minimal()+
+  labs(x="Median Income ($)",y="High school degree percentage, over 25yo (%)", title = "City distribution by Income & Education where shootings occurred")
+  
+
+
+
+```
+
+Now the same for all the cities in order to compare to the general trend.
+
+```{r 3.2 all cities}
+all_cities <- df_temp1 %>% 
+  inner_join(df_temp2, by = c("city","state")) %>%
+  select(state,city,education,income)%>%
+  group_by(state,city) %>%
+  mutate(count = 1) %>%
+  unite("city",state:city, remove = TRUE)%>%
+  drop_na(income,education)%>%
+  filter(income != "(X)", education != "(X)",income != "-", education != "-")%>%
+  mutate_at(c("education","income"),as.numeric)
+  
+all_cities %>%
+  ggplot(aes(x=income,y=education))+
+  geom_jitter(aes(size = count), alpha = 0.5,color = "blue") +
+  scale_size(range = c(0, 1))+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  labs(x="Median Income ($)",y="Highschool degree percentage, over 25yo (%)", title = "City Repartition by Income & Education")
+
+```
+
+The last chart of this section is a zoom to interpret the difference between cities where shootings occurred versus all cities. It has been depleted of all annotations on purpose, all the description is available on the two previous charts. 
+
+
+```{r effort3}
+# Combining both dataset to superpose the scatter plots
+
+shooting_cities$id <- 'df1'
+all_cities$id <- 'df2'
+df <- rbind(shooting_cities,all_cities)
+
+# Plot
+df%>%
+  mutate(alpha = ifelse(id == "df1",1,0.5))%>% # Creating an alpha column to distinguish among both dataset
+ggplot(aes(x=income,y=education,color=factor(id)))+geom_jitter(aes(size = count,alpha = alpha))+
+  scale_size(range = c(0, 10))+
+  theme(axis.text.x=element_blank(),axis.text.y=element_blank(),panel.background = element_blank(),axis.ticks = element_blank())+
+labs(x="", y="", title = "Cities with Shootings vs All Cities")+
+  theme(legend.position = "none")
+```
+
+
+We can observe distinctly that income is not playing a role, however it seems that the education level is generally lower in the cities where the shootings occurred.
+
+
